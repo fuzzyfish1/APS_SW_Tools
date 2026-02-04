@@ -1,0 +1,31 @@
+.pio
+# =====================
+# PlatformIO build artifacts
+# =====================
+.pio/
+build/
+
+# =====================
+# Environment files
+# =====================
+.env
+.env.*
+
+# =====================
+# VSCode / IDE files
+# =====================
+.vscode/
+.idea/
+*.code-workspace
+
+# =====================
+# OS junk
+# =====================
+.DS_Store
+Thumbs.db
+
+# =====================
+# Python cache (PlatformIO runs on Python)
+# =====================
+__pycache__/
+*.py[cod]
