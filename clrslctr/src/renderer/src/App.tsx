@@ -54,24 +54,24 @@ function App(): React.JSX.Element {
   }
 
   const copyToClipboard = async () => {
-    const code = generateBitmap();
-  
+    const code = generateBitmap()
+
     if (window.electron) {
-    // Desktop logic: maybe save to a file automatically?
-      console.log("Running on Desktop");
+      // Desktop logic: maybe save to a file automatically?
+      console.log('Running on Desktop')
     }
 
-  // Standard Web logic: Works on Vercel and Desktop
-    await navigator.clipboard.writeText(code);
-    alert('Copied!');
-  };
+    // Standard Web logic: Works on Vercel and Desktop
+    await navigator.clipboard.writeText(code)
+    alert('Copied!')
+  }
 
   return (
     <div
-      style={{ 
-        padding: '20px', 
-        fontFamily: 'system-ui, sans-serif', 
-        userSelect: 'none', 
+      style={{
+        padding: '20px',
+        fontFamily: 'system-ui, sans-serif',
+        userSelect: 'none',
         color: '#ffffff',
         minHeight: '100vh'
       }}
@@ -79,7 +79,7 @@ function App(): React.JSX.Element {
       onMouseLeave={handleMouseUp} // Prevents "stuck" dragging if mouse leaves window
     >
       <h2 style={{ marginTop: 0 }}>8×8 NeoPixel Bitmap Creator</h2>
-      
+
       <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
         <label htmlFor="color-picker">Active Color:</label>
         <input
@@ -146,9 +146,9 @@ function App(): React.JSX.Element {
           readOnly
           value={generateBitmap()}
           spellCheck={false}
-          style={{ 
-            width: '100%', 
-            height: '180px', 
+          style={{
+            width: '100%',
+            height: '180px',
             backgroundColor: '#121212',
             color: '#00ff00',
             fontFamily: 'monospace',
