@@ -53,14 +53,18 @@ function App(): React.JSX.Element {
     return `uint32_t bitmap[8][8] = {\n  ${rows.join(',\n  ')}\n};`
   }
 
-  const copyToClipboard = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(generateBitmap())
-      alert('Bitmap copied to clipboard!')
-    } catch (err) {
-      alert('Failed to copy bitmap')
+  const copyToClipboard = async () => {
+    const code = generateBitmap();
+  
+    if (window.electron) {
+    // Desktop logic: maybe save to a file automatically?
+      console.log("Running on Desktop");
     }
-  }
+
+  // Standard Web logic: Works on Vercel and Desktop
+    await navigator.clipboard.writeText(code);
+    alert('Copied!');
+  };
 
   return (
     <div
