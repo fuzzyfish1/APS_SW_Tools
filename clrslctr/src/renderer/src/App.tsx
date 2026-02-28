@@ -1,167 +1,110 @@
-import React, { useState, useRef } from 'react'
+import React, { useState } from 'react';
+import { Box, Typography, Paper, Divider, Grid } from '@mui/material';
+import CodeSnippet from "./components/CodeSnippet.tsx";
+import ToolSlider from "./components/ToolSlider.tsx";
+import ColorSquare from "./components/ColorSquare.tsx";
 
-const WIDTH = 8
-const HEIGHT = 8
+const myCode = "int[] chicken = {1, 2, 3}";
 
-/**
- * NeoPixel Bitmap Creator
- * Designed for Electron + Vite + Vercel
- */
-function App(): React.JSX.Element {
-  const [colorPicker, setColorPicker] = useState<string>('#ffff00')
-  const [gridColors, setGridColors] = useState<string[][]>(
-    Array.from({ length: HEIGHT }, () => Array(WIDTH).fill('#000000'))
-  )
-  const isDragging = useRef<boolean>(false)
-
-  // Logic: Updates a specific cell in the grid
-  const handleCellClick = (x: number, y: number): void => {
-    setGridColors((prevGrid) => {
-      const newGrid = prevGrid.map((row) => [...row])
-      newGrid[y][x] = colorPicker
-      return newGrid
-    })
-  }
-
-  const handleMouseDown = (x: number, y: number): void => {
-    isDragging.current = true
-    handleCellClick(x, y)
-  }
-
-  const handleMouseEnter = (x: number, y: number): void => {
-    if (isDragging.current) {
-      handleCellClick(x, y)
-    }
-  }
-
-  const handleMouseUp = (): void => {
-    isDragging.current = false
-  }
-
-  // Generates the C++ style array for NeoPixel matrices
-  const generateBitmap = (): string => {
-    const rows = gridColors.map((row) => {
-      const colors = row.map((c) => {
-        const bigint = parseInt(c.slice(1), 16)
-        const r = (bigint >> 16) & 255
-        const g = (bigint >> 8) & 255
-        const b = bigint & 255
-        return `matrix.Color(${r}, ${g}, ${b})`
-      })
-      return `{ ${colors.join(', ')} }`
-    })
-    return `uint32_t bitmap[8][8] = {\n  ${rows.join(',\n  ')}\n};`
-  }
-
-  const copyToClipboard = async () => {
-    const code = generateBitmap();
+export const rgbToString = (r: number, g: number, b: number): string => {
+  // Clamp values between 0 and 255 to prevent CSS errors
+  const clamp = (val: number) => Math.max(0, Math.min(255, Math.round(val)));
   
-    if (window.electron) {
-    // Desktop logic: maybe save to a file automatically?
-      console.log("Running on Desktop");
-    }
+  return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(b)})`;
+};
 
-  // Standard Web logic: Works on Vercel and Desktop
-    await navigator.clipboard.writeText(code);
-    alert('Copied!');
-  };
+const App: React.FC = () => {
 
+  const [redVal, setRedVal] = useState(80);
+  const [greenVal, setGreenVal] = useState(15);
+  const [blueVal, setBlueVal] = useState(0);
+
+  const currentColor = rgbToString(redVal, greenVal, blueVal);
+  
   return (
-    <div
-      style={{ 
-        padding: '20px', 
-        fontFamily: 'system-ui, sans-serif', 
-        userSelect: 'none', 
-        color: '#ffffff',
-        minHeight: '100vh'
-      }}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp} // Prevents "stuck" dragging if mouse leaves window
-    >
-      <h2 style={{ marginTop: 0 }}>8×8 NeoPixel Bitmap Creator</h2>
-      
-      <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <label htmlFor="color-picker">Active Color:</label>
-        <input
-          id="color-picker"
-          type="color"
-          value={colorPicker}
-          onChange={(e): void => setColorPicker(e.target.value)}
-          style={{ cursor: 'pointer', border: 'none', background: 'none' }}
-        />
-        <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>{colorPicker.toUpperCase()}</span>
-      </div>
+    <Box sx={{ 
+      display: 'flex', 
+      width: '100vw', 
+      height: '100vh', 
+      bgcolor: 'background.default',
+      color: 'text.primary', // This pulls the #03DAC5 from our theme
+      overflow: 'hidden' 
+    }}>
+      <Grid container sx={{ flexGrow: 1 }}>
+        
+        {/* LEFT PANEL: Tools (Width matches Right) */}
+        <Grid size={3} sx={{ 
+          borderRight: '1px solid', 
+          borderColor: 'divider',
+          p: 2 
+        }}>
+          <Typography variant="h6" sx={{ color: 'primary.main' }}>Tools</Typography>
+          <ToolSlider 
+                  label="Red" 
+                  value={redVal} 
+                  min = {0}
+                  max = {255} 
+                  onChange={setRedVal} 
+                />
+          
+          <ToolSlider 
+                  label="Green" 
+                  value={greenVal} 
+                  min={0} 
+                  max={255} 
+                  onChange={setGreenVal} 
+                />
+          <ToolSlider 
+                  label="Blue" 
+                  value={blueVal} 
+                  min={0}
+                  max={255}
+                  onChange={setBlueVal} 
+                />
+          <Typography variant="p" sx={{ color: 'primary.main' }}>current Color: </Typography>
+          <ColorSquare color={currentColor} onClick={() => console.log('Violet')} />
+          <Divider sx={{ my: 2 }} />
+          
+        </Grid>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${WIDTH}, 30px)`,
-          gridTemplateRows: `repeat(${HEIGHT}, 30px)`,
-          gap: '4px',
-          marginBottom: '20px',
-          background: '#333',
-          padding: '8px',
-          borderRadius: '8px',
-          width: 'fit-content'
-        }}
-      >
-        {gridColors.map((row, y) =>
-          row.map((color, x) => (
-            <div
-              key={`${x}-${y}`}
-              onMouseDown={(): void => handleMouseDown(x, y)}
-              onMouseEnter={(): void => handleMouseEnter(x, y)}
-              style={{
-                width: '30px',
-                height: '30px',
-                backgroundColor: color,
-                borderRadius: '4px',
-                border: '1px solid #111',
-                cursor: 'crosshair',
-                transition: 'background-color 0.1s'
-              }}
-            />
-          ))
-        )}
-      </div>
+        {/* CENTER PANEL: Workspace */}
+        <Grid size={6} sx={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          overflowY: 'auto',
+          p: 4 
+        }}>
+          <Typography variant="h4" gutterBottom sx={{ color: 'primary.main' }}>
+            Main Working Area
+          </Typography>
+          <Paper 
+            variant="outlined" 
+            sx={{ 
+              p: 2, 
+              bgcolor: '#1e1e1e', // Slightly lighter black to lift the workspace
+              borderColor: 'divider'
+            }}
+          >
+            <CodeSnippet code={myCode} language="c++" />
+          </Paper>
+        </Grid>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '500px' }}>
-        <button
-          onClick={copyToClipboard}
-          style={{
-            padding: '10px 20px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            borderRadius: '6px',
-            backgroundColor: '#0070f3',
-            color: '#fff',
-            border: 'none',
-            cursor: 'pointer'
-          }}
-        >
-          Copy uint32_t Bitmap
-        </button>
+        {/* RIGHT PANEL: History (Width matches Left) */}
+        <Grid size={3} sx={{ 
+          borderLeft: '1px solid', 
+          borderColor: 'divider',
+          p: 2 
+        }}>
+          <Typography variant="h6" sx={{ color: 'primary.main' }}>History</Typography>
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="body2" sx={{ color: 'text.primary', opacity: 0.8 }}>
+            Activity log...
+          </Typography>
+        </Grid>
+        
+      </Grid>
+    </Box>
+  );
+};
 
-        <textarea
-          readOnly
-          value={generateBitmap()}
-          spellCheck={false}
-          style={{ 
-            width: '100%', 
-            height: '180px', 
-            backgroundColor: '#121212',
-            color: '#00ff00',
-            fontFamily: 'monospace',
-            fontSize: '12px',
-            padding: '12px',
-            borderRadius: '6px',
-            border: '1px solid #444',
-            resize: 'none'
-          }}
-        />
-      </div>
-    </div>
-  )
-}
-
-export default App
+export default App;
