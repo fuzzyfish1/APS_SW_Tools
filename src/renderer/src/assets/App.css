@@ -1,0 +1,45 @@
+/*temp replacement*/
+
+/*
+	this file is supposed to be gobal css, but ngl i dont think I need it
+	css will be written in App.css
+
+*/
+
+/** colorPallete
+
+	#BB86FC <violet>
+	#3700B3 <Blue>
+	#03DAC5 <teal>
+	#121212 <Black/Background>
+	#CF6679 <red/Errors>
+	
+*/
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+
+  background-color: #121212;
+  color: #03dac5;
+  overflow: hidden;
+}
+
+.left-panel {
+  width: 250px;
+  background-color: #121212;
+  border-right: 1px solid #333;
+}
+
+.main-content {
+  flex: 1;
+  background-color: #121212;
+  padding: 20px;
+}
+
+.right-panel {
+  width: 300px;
+  background-color: #121212;
+  border-left: 1px solid #333;
+}

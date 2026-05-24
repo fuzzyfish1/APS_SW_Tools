@@ -1,0 +1,4 @@
+provider: github
+owner: fuzzyfish1
+repo: APS_SW_Tools
+updaterCacheDirName: aps-sw-tools-updater

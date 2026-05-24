@@ -1,1 +1,5 @@
-clrslctr/node_modules
+node_modules
+dist
+out
+.eslintcache
+*.local

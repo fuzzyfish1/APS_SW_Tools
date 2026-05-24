@@ -1,0 +1,27 @@
+/*temp replacement*/
+
+/*
+	this file is supposed to be gobal css, but ngl i dont think I need it
+	css will be written in App.css
+
+*/
+
+/** colorPallete
+
+	#BB86FC <violet>
+	#3700B3 <Blue>
+	#03DAC5 <teal>
+	#121212 <Black/Background>
+	#CF6679 <red/Errors>
+	
+*/
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden; /* Prevents the "bounce" or accidental scrolling */
+}
