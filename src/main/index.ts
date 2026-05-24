@@ -1,34 +1,23 @@
-import { app, shell, BrowserWindow, ipcMain, session } from 'electron'
+import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import icon from '../../resources/icon.png?asset'
 
-// ─── Auto-updater ────────────────────────────────────────────────────────────
+// held so the serial:select-port IPC can resolve it later
+let _portSelectCallback: ((portId: string) => void) | null = null
 
+// auto updater setup - only runs in prod, dev builds have no feed
 function setupAutoUpdater(mainWindow: BrowserWindow): void {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
-  autoUpdater.on('update-available', () => {
-    mainWindow.webContents.send('update:available')
-  })
+  autoUpdater.on('update-available', () => mainWindow.webContents.send('update:available'))
+  autoUpdater.on('update-downloaded', () => mainWindow.webContents.send('update:downloaded'))
+  autoUpdater.on('error', (err) => console.error('[updater]', err.message))
 
-  autoUpdater.on('update-downloaded', () => {
-    mainWindow.webContents.send('update:downloaded')
-  })
-
-  autoUpdater.on('error', (err) => {
-    console.error('[updater]', err.message)
-  })
-
-  // Only check in production — dev builds don't have a proper feed
-  if (!is.dev) {
-    autoUpdater.checkForUpdatesAndNotify()
-  }
+  if (!is.dev) autoUpdater.checkForUpdatesAndNotify()
 }
-
-// ─── Window ──────────────────────────────────────────────────────────────────
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -38,35 +27,28 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    icon: icon,
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
     }
   })
 
-  // ── Web Serial API ──────────────────────────────────────────────────────────
-  // Grant serial-port access so the renderer can use navigator.serial directly.
+  // web serial setup
+  // all three handlers use the same session object so there's no mismatch
+  const ses = mainWindow.webContents.session
 
-  mainWindow.webContents.session.on(
-    'select-serial-port',
-    (event, portList, _webContents, callback) => {
-      event.preventDefault()
-      // The renderer shows its own port-picker UI, so the session event is
-      // only fired when the browser's built-in chooser would pop up.
-      // Auto-select the first available port as a fallback.
-      callback(portList.length > 0 ? portList[0].portId : '')
-    }
-  )
-
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
-    return permission === 'serial'
+  // when requestPort() is called in the renderer, Electron intercepts here instead
+  // of showing the browser's default picker. we forward the port list to the renderer
+  // so it can show its own dropdown dialog and send back the chosen portId.
+  ses.on('select-serial-port', (event, portList, _wc, callback) => {
+    event.preventDefault()
+    _portSelectCallback = callback
+    mainWindow.webContents.send('serial:port-list', portList)
   })
 
-  session.defaultSession.setDevicePermissionHandler((details) => {
-    return details.deviceType === 'serial'
-  })
-  // ─────────────────────────────────────────────────────────────────────────
+  ses.setPermissionCheckHandler((_wc, permission) => permission === 'serial')
+  ses.setDevicePermissionHandler((details) => details.deviceType === 'serial')
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
@@ -85,15 +67,14 @@ function createWindow(): void {
   }
 }
 
-// ─── IPC ─────────────────────────────────────────────────────────────────────
+// renderer sends back the portId it wants (or '' to cancel)
+ipcMain.handle('serial:select-port', (_event, portId: string) => {
+  _portSelectCallback?.(portId)
+  _portSelectCallback = null
+})
 
-/** Renderer can ask for the running app version. */
 ipcMain.handle('app:version', () => app.getVersion())
-
-/** Renderer triggers the update install (called after update-downloaded). */
 ipcMain.on('update:install', () => autoUpdater.quitAndInstall())
-
-// ─── App lifecycle ───────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.aps.sw-tools')

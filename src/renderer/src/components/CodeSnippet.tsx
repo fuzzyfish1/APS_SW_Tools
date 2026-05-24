@@ -21,9 +21,7 @@ const CodeSnippet: React.FC<CodeSnippetProps> = ({ code, language = 'typescript'
   }
 
   return (
-    <div
-      style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', margin: '20px 0' }}
-    >
+    <div style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden' }}>
       {/* Header / Copy Button Container */}
       <div
         style={{
@@ -54,15 +52,18 @@ const CodeSnippet: React.FC<CodeSnippetProps> = ({ code, language = 'typescript'
         </button>
       </div>
 
-      {/* The Actual Code Box */}
+      {/* Scrollable code block */}
       <SyntaxHighlighter
         language={language}
         style={vscDarkPlus}
         customStyle={{
           margin: 0,
-          padding: '20px',
-          fontSize: '14px',
-          lineHeight: '1.5'
+          padding: '16px 20px',
+          fontSize: '13px',
+          lineHeight: '1.5',
+          maxHeight: '320px',
+          overflowY: 'auto',
+          overflowX: 'auto'
         }}
       >
         {code}

@@ -1,25 +1,26 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-/** Typed surface exposed to the renderer under window.api */
 const api = {
-  /** Returns the Electron app version string, e.g. "3.0.0" */
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
 
-  /** Register a callback for when an update is available for download. */
   onUpdateAvailable: (cb: () => void): void => {
     ipcRenderer.on('update:available', cb)
   },
-
-  /** Register a callback for when an update has been downloaded and is ready. */
   onUpdateDownloaded: (cb: () => void): void => {
     ipcRenderer.on('update:downloaded', cb)
   },
-
-  /** Tell the main process to quit and install the downloaded update. */
   installUpdate: (): void => {
     ipcRenderer.send('update:install')
-  }
+  },
+
+  // serial port picker - called when the main process intercepts requestPort()
+  // and forwards the available port list. the renderer shows a dropdown and
+  // responds with selectPort(portId) or selectPort('') to cancel.
+  onPortList: (cb: (ports: Array<{ portId: string; portName: string; displayName?: string }>) => void): void => {
+    ipcRenderer.on('serial:port-list', (_e, ports) => cb(ports))
+  },
+  selectPort: (portId: string): Promise<void> => ipcRenderer.invoke('serial:select-port', portId)
 }
 
 if (process.contextIsolated) {

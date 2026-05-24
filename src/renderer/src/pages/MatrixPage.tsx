@@ -1,23 +1,12 @@
-/**
- * MatrixPage — 8×8 LED matrix bitmap editor.
- *
- * Features
- * ────────
- * • Paint cells by clicking/dragging (mouse)
- * • Per-pane undo / redo (Ctrl+Z / Ctrl+Shift+Z)
- * • Multiple "Image Canvases" (panes) in the right panel
- * • Each pane has an independent variable name for code export
- * • Drag-and-drop pane reordering
- * • Single-frame C++ code generation (FastLED CRGB array)
- * • Multi-frame animation code generation (shown when ≥2 panes and
- *   the right panel is scrolled to the top)
- */
+// 8x8 LED matrix bitmap editor
+// paint cells, manage multiple image canvases, copy the generated C++ into your sketch
 import React, {
   useState,
   useCallback,
   useEffect,
   useRef,
   useMemo,
+  memo,
 } from 'react'
 import {
   Box,
@@ -44,8 +33,6 @@ import ToolSlider from '../components/ToolSlider'
 import ColorSquare from '../components/ColorSquare'
 import CodeSnippet from '../components/CodeSnippet'
 
-// ─── Colour helpers ──────────────────────────────────────────────────────────
-
 const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)))
 
 export const rgbToString = (r: number, g: number, b: number): string =>
@@ -59,11 +46,12 @@ const parseRgb = (s: string): { r: number; g: number; b: number } => {
 const BLACK = 'rgb(0, 0, 0)'
 const emptyGrid = (): string[] => Array(64).fill(BLACK)
 
-// ─── Pane model ───────────────────────────────────────────────────────────────
+// each canvas the user is working on
 
 interface Pane {
   id: string
   name: string
+  delay: number       // ms to wait after drawImage() for this frame
   grid: string[]
   undoStack: string[][]
   redoStack: string[][]
@@ -75,57 +63,78 @@ const nextId = () => `pane_${++_counter}`
 const createPane = (name: string): Pane => ({
   id: nextId(),
   name,
+  delay: 100,
   grid: emptyGrid(),
   undoStack: [],
   redoStack: [],
 })
 
-// ─── Code generation ─────────────────────────────────────────────────────────
+// code generation
+// matches the format from drawImageExample - uint32_t name[8][8] with matrix.Color()
 
-const generateSingleCode = (name: string, grid: string[]): string => {
+// builds one frame's array declaration
+const buildFrameDecl = (name: string, grid: string[]): string => {
   const varName = name.trim() || 'frame'
   const rows: string[] = []
   for (let row = 0; row < 8; row++) {
     const cells = grid.slice(row * 8, row * 8 + 8).map((c) => {
       const { r, g, b } = parseRgb(c)
-      return `CRGB(${r},${g},${b})`
+      return `matrix.Color(${r}, ${g}, ${b})`
     })
-    rows.push('  ' + cells.join(', '))
+    rows.push('    { ' + cells.join(', ') + ' }')
   }
-  return `CRGB ${varName}[64] = {\n${rows.join(',\n')}\n};`
+  return [`uint32_t ${varName}[8][8] = {`, rows.join(',\n'), `};`].join('\n')
 }
 
-const generateAnimationCode = (panes: Pane[], delayMs: number): string => {
-  const frameDecls = panes
-    .map((p) => generateSingleCode(p.name, p.grid))
-    .join('\n\n')
+// single frame - just the array, nothing else
+const generateSingleCode = (name: string, grid: string[]): string =>
+  buildFrameDecl(name, grid)
 
-  const names = panes.map((p) => p.name.trim() || 'frame').join(', ')
+// animation - all frame arrays at the top, then drawImage/delay calls in order, no loops
+const generateAnimationCode = (panes: Pane[]): string => {
+  const decls = panes.map((p) => buildFrameDecl(p.name.trim() || 'frame', p.grid)).join('\n\n')
 
-  const footer = [
-    '',
-    `const CRGB* animation[] = { ${names} };`,
-    `const uint8_t  ANIMATION_FRAMES = ${panes.length};`,
-    `const uint16_t FRAME_DELAY_MS   = ${delayMs};`,
-    '',
-    'void playAnimation(CRGB* leds) {',
-    '  for (uint8_t i = 0; i < ANIMATION_FRAMES; i++) {',
-    '    memcpy(leds, animation[i], 64 * sizeof(CRGB));',
-    '    FastLED.show();',
-    '    delay(FRAME_DELAY_MS);',
-    '  }',
-    '}',
-  ].join('\n')
+  const calls = panes
+    .map((p) => {
+      const v = p.name.trim() || 'frame'
+      return `drawImage(matrix, ${v});\ndelay(${p.delay});`
+    })
+    .join('\n')
 
-  return frameDecls + '\n' + footer
+  return decls + '\n\n' + calls
 }
 
-// ─── Mini 8×8 canvas preview ─────────────────────────────────────────────────
+// ─── Memoized grid cell — only re-renders when its own colour changes ─────────
 
-const PanePreview: React.FC<{ grid: string[]; size?: number }> = ({
-  grid,
-  size = 64,
-}) => {
+interface GridCellProps {
+  color: string
+  onMouseDown: () => void
+  onMouseEnter: () => void
+}
+
+const GridCell = memo(({ color, onMouseDown, onMouseEnter }: GridCellProps) => (
+  <Box
+    onMouseDown={onMouseDown}
+    onMouseEnter={onMouseEnter}
+    sx={{
+      bgcolor: color,
+      borderRadius: '2px',
+      cursor: 'crosshair',
+      transition: 'background-color 0.1s ease',
+      border: '1px solid rgba(255,255,255,0.05)',
+      '&:hover': {
+        filter: 'brightness(1.2)',
+        borderColor: 'primary.main',
+      },
+    }}
+  />
+))
+GridCell.displayName = 'GridCell'
+
+// small thumbnail preview per pane - memoized so painting the active pane
+// doesn't re-render every other thumbnail in the list
+
+const PanePreview = memo(({ grid, size = 64 }: { grid: string[]; size?: number }) => {
   const cell = Math.floor(size / 8)
   return (
     <Box
@@ -147,28 +156,59 @@ const PanePreview: React.FC<{ grid: string[]; size?: number }> = ({
       ))}
     </Box>
   )
-}
-
-// ─── MatrixPage ───────────────────────────────────────────────────────────────
+})
+PanePreview.displayName = 'PanePreview'
 
 const MatrixPage: React.FC = () => {
-  // Pane state
   const [panes, setPanes] = useState<Pane[]>([createPane('frame1')])
   const [activePaneId, setActivePaneId] = useState<string>(() => panes[0].id)
 
-  // Colour picker
   const [redVal, setRedVal] = useState(80)
   const [greenVal, setGreenVal] = useState(15)
   const [blueVal, setBlueVal] = useState(0)
 
-  // Drawing
-  const [isMouseDown, setIsMouseDown] = useState(false)
+  // ref instead of state so mouse-enter while dragging doesn't trigger renders
+  const isMouseDownRef = useRef(false)
 
-  // Code output controls
+  // saves the grid state at the start of each stroke so we push one undo entry
+  // per drag, not one per cell
+  const strokeStartRef = useRef<{ paneId: string; grid: string[] } | null>(null)
+
+  // eyedropper - samples any pixel on screen using the EyeDropper API
+  // only available in Chrome/Edge/Electron, not Firefox/Safari
+  const eyedropperSupported = typeof window !== 'undefined' && 'EyeDropper' in window
+
+  const handleEyedropper = useCallback(async () => {
+    if (!eyedropperSupported) return
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dropper = new (window as any).EyeDropper()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result: any = await dropper.open()
+      const raw: string = (result?.sRGBHex ?? '').trim()
+      // chrome returns 'rgba(r, g, b, a)' despite the property being called sRGBHex
+      // try rgba(...) first, then fall back to #rrggbb
+      const rgbaMatch = raw.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+      const hexMatch  = raw.match(/^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})/)
+      if (rgbaMatch) {
+        setRedVal(parseInt(rgbaMatch[1], 10))
+        setGreenVal(parseInt(rgbaMatch[2], 10))
+        setBlueVal(parseInt(rgbaMatch[3], 10))
+      } else if (hexMatch) {
+        setRedVal(parseInt(hexMatch[1], 16))
+        setGreenVal(parseInt(hexMatch[2], 16))
+        setBlueVal(parseInt(hexMatch[3], 16))
+      } else {
+        console.warn('[eyedropper] unknown format:', raw)
+      }
+    } catch {
+      // user pressed Escape to cancel - not an error
+    }
+  }, [eyedropperSupported])
+
   const [showAnimCode, setShowAnimCode] = useState(false)
-  const [animDelayMs, setAnimDelayMs] = useState(100)
 
-  // Right-panel scroll tracker (animation button only visible at top)
+  // show animation button only when user scrolls to the top of the right panel
   const rightPanelRef = useRef<HTMLDivElement>(null)
   const [atTop, setAtTop] = useState(true)
 
@@ -191,14 +231,30 @@ const MatrixPage: React.FC = () => {
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
-  // ── Global mouse-up (stop painting if mouse released outside grid) ────────
+  // on mouseup: stop painting and commit the entire stroke as one undo entry
   useEffect(() => {
-    const up = () => setIsMouseDown(false)
+    const up = () => {
+      isMouseDownRef.current = false
+      if (!strokeStartRef.current) return
+      const { paneId, grid: startGrid } = strokeStartRef.current
+      strokeStartRef.current = null
+      // only push if the grid actually changed during the stroke
+      setPanes((prev) =>
+        prev.map((p) => {
+          if (p.id !== paneId || p.grid === startGrid) return p
+          return {
+            ...p,
+            undoStack: [...p.undoStack.slice(-49), startGrid],
+            redoStack: [],
+          }
+        })
+      )
+    }
     window.addEventListener('mouseup', up)
     return () => window.removeEventListener('mouseup', up)
   }, [])
 
-  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  // ctrl+z / ctrl+shift+z / ctrl+y for undo/redo
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey
@@ -216,7 +272,6 @@ const MatrixPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePaneId])  // re-bind when active pane changes
 
-  // ── Pane helpers ──────────────────────────────────────────────────────────
   const updateActive = useCallback(
     (updater: (p: Pane) => Pane) => {
       setPanes((prev) =>
@@ -226,18 +281,14 @@ const MatrixPage: React.FC = () => {
     [activePaneId],
   )
 
+  // just update the grid - undo is committed in the mouseup handler
   const paintCell = useCallback(
     (idx: number) => {
       updateActive((p) => {
         if (p.grid[idx] === currentColor) return p
         const next = [...p.grid]
         next[idx] = currentColor
-        return {
-          ...p,
-          grid: next,
-          undoStack: [...p.undoStack.slice(-49), p.grid],
-          redoStack: [],
-        }
+        return { ...p, grid: next }
       })
     },
     [currentColor, updateActive],
@@ -293,7 +344,12 @@ const MatrixPage: React.FC = () => {
     [updateActive],
   )
 
-  // ── Drag-and-drop reordering ──────────────────────────────────────────────
+  const setDelay = useCallback(
+    (delay: number) => updateActive((p) => ({ ...p, delay })),
+    [updateActive],
+  )
+
+  // drag and drop to reorder panes
   const onDragStart =
     (idx: number) => (e: React.DragEvent) => {
       dragSrcRef.current = idx
@@ -325,8 +381,8 @@ const MatrixPage: React.FC = () => {
   )
 
   const animCode = useMemo(
-    () => generateAnimationCode(panes, animDelayMs),
-    [panes, animDelayMs],
+    () => generateAnimationCode(panes),
+    [panes],
   )
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -406,6 +462,26 @@ const MatrixPage: React.FC = () => {
             }}
           />
 
+          {/* Per-frame delay */}
+          <TextField
+            label="Frame delay (ms)"
+            type="number"
+            value={activePane.delay}
+            onChange={(e) => setDelay(Math.max(0, +e.target.value))}
+            size="small"
+            fullWidth
+            helperText="delay() after drawImage()"
+            inputProps={{ min: 0 }}
+            sx={{
+              '& .MuiOutlinedInput-root': { color: 'text.primary' },
+              '& .MuiInputLabel-root': { color: 'text.secondary' },
+              '& .MuiFormHelperText-root': {
+                color: 'text.secondary',
+                opacity: 0.6,
+              },
+            }}
+          />
+
           <Divider />
 
           {/* RGB sliders */}
@@ -437,12 +513,16 @@ const MatrixPage: React.FC = () => {
                 <ColorSquare color={currentColor} />
               </span>
             </Tooltip>
-            <Tooltip title="Pick colour (native picker coming soon)">
+
+            {/* eyedropper - samples any pixel on screen
+                Chrome/Edge/Electron only (not Firefox) */}
+            <Tooltip title={eyedropperSupported ? 'Eyedropper — pick colour from screen' : 'Eyedropper not supported in this browser'}>
               <span>
                 <IconButton
                   size="small"
-                  sx={{ color: 'primary.main' }}
-                  disabled
+                  sx={{ color: eyedropperSupported ? 'primary.main' : 'text.disabled' }}
+                  onClick={handleEyedropper}
+                  disabled={!eyedropperSupported}
                 >
                   <ColorizeIcon fontSize="small" />
                 </IconButton>
@@ -504,25 +584,17 @@ const MatrixPage: React.FC = () => {
             }}
           >
             {activePane.grid.map((color, index) => (
-              <Box
+              <GridCell
                 key={index}
+                color={color}
                 onMouseDown={() => {
-                  setIsMouseDown(true)
+                  isMouseDownRef.current = true
+                  // snapshot the grid before this stroke starts
+                  strokeStartRef.current = { paneId: activePaneId, grid: activePane.grid }
                   paintCell(index)
                 }}
                 onMouseEnter={() => {
-                  if (isMouseDown) paintCell(index)
-                }}
-                sx={{
-                  bgcolor: color,
-                  borderRadius: '2px',
-                  cursor: 'crosshair',
-                  transition: 'background-color 0.1s ease',
-                  border: '1px solid rgba(255,255,255,0.05)',
-                  '&:hover': {
-                    filter: 'brightness(1.2)',
-                    borderColor: 'primary.main',
-                  },
+                  if (isMouseDownRef.current) paintCell(index)
                 }}
               />
             ))}
@@ -538,41 +610,6 @@ const MatrixPage: React.FC = () => {
               language="cpp"
             />
 
-            {/* Animation delay control — shown when animation code is active */}
-            {showAnimCode && (
-              <Stack
-                direction="row"
-                alignItems="center"
-                spacing={1.5}
-                sx={{ px: 2, pb: 1.5 }}
-              >
-                <Typography
-                  variant="caption"
-                  sx={{ color: 'text.secondary' }}
-                >
-                  Frame delay:
-                </Typography>
-                <TextField
-                  type="number"
-                  value={animDelayMs}
-                  onChange={(e) =>
-                    setAnimDelayMs(Math.max(1, +e.target.value))
-                  }
-                  size="small"
-                  sx={{
-                    width: 90,
-                    '& input': { color: 'text.primary', py: '4px' },
-                  }}
-                  inputProps={{ min: 1 }}
-                />
-                <Typography
-                  variant="caption"
-                  sx={{ color: 'text.secondary' }}
-                >
-                  ms
-                </Typography>
-              </Stack>
-            )}
           </Paper>
         </Grid>
 
