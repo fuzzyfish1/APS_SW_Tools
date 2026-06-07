@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useRef,
   useMemo,
+  useDeferredValue,
   memo,
 } from 'react'
 import {
@@ -105,28 +106,29 @@ const generateAnimationCode = (panes: Pane[]): string => {
 }
 
 // ─── Memoized grid cell — only re-renders when its own colour changes ─────────
+// Static sx defined outside so Emotion caches the class after the first render.
+// bgcolor is set via inline style to bypass Emotion on every paint.
+const CELL_SX = {
+  borderRadius: '2px',
+  cursor: 'crosshair',
+  transition: 'background-color 0.1s ease',
+  border: '1px solid rgba(255,255,255,0.05)',
+  '&:hover': {
+    filter: 'brightness(1.2)',
+    borderColor: 'primary.main',
+  },
+} as const
 
 interface GridCellProps {
   color: string
-  onMouseDown: () => void
-  onMouseEnter: () => void
+  index: number
 }
 
-const GridCell = memo(({ color, onMouseDown, onMouseEnter }: GridCellProps) => (
+const GridCell = memo(({ color, index }: GridCellProps) => (
   <Box
-    onMouseDown={onMouseDown}
-    onMouseEnter={onMouseEnter}
-    sx={{
-      bgcolor: color,
-      borderRadius: '2px',
-      cursor: 'crosshair',
-      transition: 'background-color 0.1s ease',
-      border: '1px solid rgba(255,255,255,0.05)',
-      '&:hover': {
-        filter: 'brightness(1.2)',
-        borderColor: 'primary.main',
-      },
-    }}
+    data-idx={index}
+    style={{ backgroundColor: color }}
+    sx={CELL_SX}
   />
 ))
 GridCell.displayName = 'GridCell'
@@ -149,9 +151,9 @@ const PanePreview = memo(({ grid, size = 64 }: { grid: string[]; size?: number }
       }}
     >
       {grid.map((color, i) => (
-        <Box
+        <div
           key={i}
-          sx={{ width: cell - 1, height: cell - 1, bgcolor: color }}
+          style={{ width: cell - 1, height: cell - 1, backgroundColor: color }}
         />
       ))}
     </Box>
@@ -207,6 +209,8 @@ const MatrixPage: React.FC = () => {
   }, [eyedropperSupported])
 
   const [showAnimCode, setShowAnimCode] = useState(false)
+  const showAnimCodeRef = useRef(showAnimCode)
+  showAnimCodeRef.current = showAnimCode
 
   // show animation button only when user scrolls to the top of the right panel
   const rightPanelRef = useRef<HTMLDivElement>(null)
@@ -222,6 +226,18 @@ const MatrixPage: React.FC = () => {
   const canUndo = activePane.undoStack.length > 0
   const canRedo = activePane.redoStack.length > 0
 
+  // Always-fresh refs — read by event handlers without becoming dependencies
+  const activePaneRef = useRef(activePane)
+  activePaneRef.current = activePane
+  const currentColorRef = useRef(currentColor)
+  currentColorRef.current = currentColor
+
+  // Imperative painting state — never touches React during a stroke
+  const paintingGridRef = useRef<string[]>([])
+  const cellDomMap = useRef<Map<number, HTMLElement>>(new Map())
+  const gridContainerRef = useRef<HTMLDivElement>(null)
+  const lastPaintedRef = useRef<number>(-1)
+
   // ── Scroll tracking ───────────────────────────────────────────────────────
   useEffect(() => {
     const el = rightPanelRef.current
@@ -231,19 +247,29 @@ const MatrixPage: React.FC = () => {
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
-  // on mouseup: stop painting and commit the entire stroke as one undo entry
+  // Build cell DOM map once after mount — GridCells never unmount so elements are stable
+  useEffect(() => {
+    if (!gridContainerRef.current) return
+    gridContainerRef.current.querySelectorAll<HTMLElement>('[data-idx]').forEach(el => {
+      cellDomMap.current.set(parseInt(el.getAttribute('data-idx')!, 10), el)
+    })
+  }, [])
+
+  // on mouseup: commit the finished stroke to React state in one update
   useEffect(() => {
     const up = () => {
       isMouseDownRef.current = false
       if (!strokeStartRef.current) return
       const { paneId, grid: startGrid } = strokeStartRef.current
       strokeStartRef.current = null
-      // only push if the grid actually changed during the stroke
+      const finalGrid = paintingGridRef.current
+      if (finalGrid === startGrid) return
       setPanes((prev) =>
         prev.map((p) => {
-          if (p.id !== paneId || p.grid === startGrid) return p
+          if (p.id !== paneId) return p
           return {
             ...p,
+            grid: finalGrid,
             undoStack: [...p.undoStack.slice(-49), startGrid],
             redoStack: [],
           }
@@ -281,18 +307,16 @@ const MatrixPage: React.FC = () => {
     [activePaneId],
   )
 
-  // just update the grid - undo is committed in the mouseup handler
-  const paintCell = useCallback(
-    (idx: number) => {
-      updateActive((p) => {
-        if (p.grid[idx] === currentColor) return p
-        const next = [...p.grid]
-        next[idx] = currentColor
-        return { ...p, grid: next }
-      })
-    },
-    [currentColor, updateActive],
-  )
+  // direct DOM paint — zero React involvement during a stroke
+  const paintCellImperative = useCallback((idx: number) => {
+    const color = currentColorRef.current
+    if (paintingGridRef.current[idx] === color) return
+    const next = [...paintingGridRef.current]
+    next[idx] = color
+    paintingGridRef.current = next
+    const el = cellDomMap.current.get(idx)
+    if (el) el.style.backgroundColor = color
+  }, [])
 
   const handleUndo = useCallback(() => {
     updateActive((p) => {
@@ -374,15 +398,46 @@ const MatrixPage: React.FC = () => {
     dragSrcRef.current = null
   }
 
+  // ── Grid paint handlers (container-level, not per-cell) ───────────────────
+  // Placed on the Paper so GridCell never receives function props — memo works.
+  const handleGridMouseDown = useCallback((e: React.MouseEvent) => {
+    const el = (e.target as HTMLElement).closest('[data-idx]')
+    if (!el) return
+    const idx = parseInt(el.getAttribute('data-idx')!, 10)
+    isMouseDownRef.current = true
+    lastPaintedRef.current = idx
+    const snap = activePaneRef.current.grid
+    paintingGridRef.current = snap
+    strokeStartRef.current = { paneId: activePaneRef.current.id, grid: snap }
+    if (showAnimCodeRef.current) setShowAnimCode(false)
+    paintCellImperative(idx)
+  }, [paintCellImperative])
+
+  const handleGridMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isMouseDownRef.current) return
+    const el = (e.target as HTMLElement).closest('[data-idx]')
+    if (!el) return
+    const idx = parseInt(el.getAttribute('data-idx')!, 10)
+    if (idx === lastPaintedRef.current) return
+    lastPaintedRef.current = idx
+    paintCellImperative(idx)
+  }, [paintCellImperative])
+
   // ── Code output ───────────────────────────────────────────────────────────
+  // useDeferredValue lets React prioritise painting over code generation —
+  // the snippet updates in idle time instead of blocking each mouse move.
+  const deferredGrid = useDeferredValue(activePane.grid)
+  const deferredName = useDeferredValue(activePane.name)
+  const deferredPanes = useDeferredValue(panes)
+
   const singleCode = useMemo(
-    () => generateSingleCode(activePane.name, activePane.grid),
-    [activePane.name, activePane.grid],
+    () => generateSingleCode(deferredName, deferredGrid),
+    [deferredName, deferredGrid],
   )
 
   const animCode = useMemo(
-    () => generateAnimationCode(panes),
-    [panes],
+    () => generateAnimationCode(deferredPanes),
+    [deferredPanes],
   )
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -569,7 +624,10 @@ const MatrixPage: React.FC = () => {
 
           {/* 8×8 drawing grid */}
           <Paper
+            ref={gridContainerRef}
             elevation={4}
+            onMouseDown={handleGridMouseDown}
+            onMouseMove={handleGridMouseMove}
             sx={{
               p: 1,
               bgcolor: '#1e1e1e',
@@ -587,15 +645,7 @@ const MatrixPage: React.FC = () => {
               <GridCell
                 key={index}
                 color={color}
-                onMouseDown={() => {
-                  isMouseDownRef.current = true
-                  // snapshot the grid before this stroke starts
-                  strokeStartRef.current = { paneId: activePaneId, grid: activePane.grid }
-                  paintCell(index)
-                }}
-                onMouseEnter={() => {
-                  if (isMouseDownRef.current) paintCell(index)
-                }}
+                index={index}
               />
             ))}
           </Paper>
@@ -694,7 +744,7 @@ const MatrixPage: React.FC = () => {
               </Button>
             )}
 
-            {panes.map((pane, idx) => (
+            {deferredPanes.map((pane, idx) => (
               <Box
                 key={pane.id}
                 draggable

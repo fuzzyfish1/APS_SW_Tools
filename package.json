@@ -1,6 +1,6 @@
 {
   "name": "aps-sw-tools",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "APS Software Tools — Matrix Editor & Serial Plotter",
   "main": "./out/main/index.js",
   "author": "Zain Ali",
