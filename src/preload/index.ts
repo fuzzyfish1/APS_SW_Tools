@@ -5,10 +5,10 @@ const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
 
   onUpdateAvailable: (cb: () => void): void => {
-    ipcRenderer.on('update:available', cb)
+    ipcRenderer.once('update:available', cb)
   },
   onUpdateDownloaded: (cb: () => void): void => {
-    ipcRenderer.on('update:downloaded', cb)
+    ipcRenderer.once('update:downloaded', cb)
   },
   installUpdate: (): void => {
     ipcRenderer.send('update:install')

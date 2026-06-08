@@ -44,6 +44,13 @@ const parseRgb = (s: string): { r: number; g: number; b: number } => {
   return m ? { r: +m[1], g: +m[2], b: +m[3] } : { r: 0, g: 0, b: 0 }
 }
 
+// strips characters that are illegal in C++ identifiers and ensures the result
+// doesn't start with a digit — used by all code generation paths
+const toCppIdent = (raw: string): string => {
+  const s = raw.replace(/[^a-zA-Z0-9_]/g, '_')
+  return /^\d/.test(s) ? `_${s}` : s
+}
+
 const BLACK = 'rgb(0, 0, 0)'
 const emptyGrid = (): string[] => Array(64).fill(BLACK)
 
@@ -75,7 +82,7 @@ const createPane = (name: string): Pane => ({
 
 // builds one frame's array declaration
 const buildFrameDecl = (name: string, grid: string[]): string => {
-  const varName = name.trim() || 'frame'
+  const varName = toCppIdent(name.trim()) || 'frame'
   const rows: string[] = []
   for (let row = 0; row < 8; row++) {
     const cells = grid.slice(row * 8, row * 8 + 8).map((c) => {
@@ -93,14 +100,20 @@ const generateSingleCode = (name: string, grid: string[]): string =>
 
 // animation - all frame arrays at the top, then drawImage/delay calls in order, no loops
 const generateAnimationCode = (panes: Pane[]): string => {
-  const decls = panes.map((p) => buildFrameDecl(p.name.trim() || 'frame', p.grid)).join('\n\n')
+  // resolve C++ identifiers and deduplicate so two panes with the same name
+  // don't produce a redeclaration error (e.g. two blank panes both called 'frame')
+  const seen = new Map<string, number>()
+  const varNames = panes.map(p => {
+    const base = toCppIdent(p.name.trim()) || 'frame'
+    const n = seen.get(base) ?? 0
+    seen.set(base, n + 1)
+    return n === 0 ? base : `${base}_${n}`
+  })
 
-  const calls = panes
-    .map((p) => {
-      const v = p.name.trim() || 'frame'
-      return `drawImage(matrix, ${v});\ndelay(${p.delay});`
-    })
-    .join('\n')
+  const decls = panes.map((p, i) => buildFrameDecl(varNames[i], p.grid)).join('\n\n')
+  const calls = panes.map((p, i) =>
+    `drawImage(matrix, ${varNames[i]});\ndelay(${p.delay});`
+  ).join('\n')
 
   return decls + '\n\n' + calls
 }
@@ -111,7 +124,6 @@ const generateAnimationCode = (panes: Pane[]): string => {
 const CELL_SX = {
   borderRadius: '2px',
   cursor: 'crosshair',
-  transition: 'background-color 0.1s ease',
   border: '1px solid rgba(255,255,255,0.05)',
   '&:hover': {
     filter: 'brightness(1.2)',
@@ -308,12 +320,11 @@ const MatrixPage: React.FC = () => {
   )
 
   // direct DOM paint — zero React involvement during a stroke
+  // paintingGridRef is a copy made at mousedown so we can mutate freely
   const paintCellImperative = useCallback((idx: number) => {
     const color = currentColorRef.current
     if (paintingGridRef.current[idx] === color) return
-    const next = [...paintingGridRef.current]
-    next[idx] = color
-    paintingGridRef.current = next
+    paintingGridRef.current[idx] = color
     const el = cellDomMap.current.get(idx)
     if (el) el.style.backgroundColor = color
   }, [])
@@ -407,7 +418,7 @@ const MatrixPage: React.FC = () => {
     isMouseDownRef.current = true
     lastPaintedRef.current = idx
     const snap = activePaneRef.current.grid
-    paintingGridRef.current = snap
+    paintingGridRef.current = [...snap]  // copy once — mutations stay in paintingGridRef
     strokeStartRef.current = { paneId: activePaneRef.current.id, grid: snap }
     if (showAnimCodeRef.current) setShowAnimCode(false)
     paintCellImperative(idx)
@@ -445,14 +456,15 @@ const MatrixPage: React.FC = () => {
     <Box
       sx={{
         display: 'flex',
+        flex: '1 1 0',
+        minHeight: 0,
         width: '100%',
-        height: '100%',
         overflow: 'hidden',
         bgcolor: 'background.default',
         color: 'text.primary',
       }}
     >
-      <Grid container sx={{ flexGrow: 1, height: '100%' }}>
+      <Grid container sx={{ flexGrow: 1, minHeight: 0, gridAutoRows: 'minmax(0, 1fr)' }}>
         {/* ── LEFT PANEL: Tools ─────────────────────────────────────────── */}
         <Grid
           size={3}
@@ -604,6 +616,7 @@ const MatrixPage: React.FC = () => {
             overflowY: 'auto',
             p: 3,
             gap: 2,
+            maxHeight: 'calc(100vh - 48px)',
           }}
         >
           <Stack direction="row" alignItems="center" spacing={1}>
@@ -639,6 +652,7 @@ const MatrixPage: React.FC = () => {
               aspectRatio: '1 / 1',
               userSelect: 'none',
               alignSelf: 'flex-start',
+              flexShrink: 0,
             }}
           >
             {activePane.grid.map((color, index) => (
@@ -653,7 +667,7 @@ const MatrixPage: React.FC = () => {
           {/* Code output */}
           <Paper
             variant="outlined"
-            sx={{ bgcolor: '#1e1e1e', borderColor: 'divider' }}
+            sx={{ bgcolor: '#1e1e1e', borderColor: 'divider', flexShrink: 0 }}
           >
             <CodeSnippet
               code={showAnimCode ? animCode : singleCode}

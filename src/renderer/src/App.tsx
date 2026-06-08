@@ -32,7 +32,7 @@ const App: React.FC = () => (
     <Navbar />
 
     {/* Page content — fills the remaining vertical space */}
-    <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+    <Box sx={{ flexGrow: 1, overflow: 'hidden', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Routes>
         <Route path="/" element={<MatrixPage />} />
         <Route path="/plotter" element={<PlotterPage />} />
